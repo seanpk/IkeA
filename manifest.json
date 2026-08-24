@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "id": "ikekavas.ikea",
+  "name": "IkeA",
+  "version": "1.0.0",
+  "author": "Ike Kavas",
+  "description": "Ike know every App — searchable switcher for running windows",
+  "kinds": [
+    "overlay",
+    "bar-widget"
+  ],
+  "keepLoaded": true,
+  "entryPoints": {
+    "overlay": "Switcher.qml",
+    "barWidget": "BarButton.qml"
+  },
+  "barWidget": {
+    "displayName": "IkeA",
+    "description": "Ike know every App",
+    "category": "Compositor",
+    "allowMultiple": false,
+    "defaultSection": "left"
+  }
+}
