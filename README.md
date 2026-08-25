@@ -7,10 +7,10 @@ An Omarchy shell plugin that lists every open GUI window so you can switch with 
 ## Install
 
 ```bash
-omarchy plugin add https://github.com/YOUR_GITHUB_USER/ikea.git --enable
+omarchy plugin add https://github.com/ike-kavas/IkeA.git --enable
 ```
 
-Replace the URL with the public GitHub repository once it is published. Then add a shortcut if you want one:
+Then add a shortcut if you want one:
 
 ```lua
 -- ~/.config/hypr/bindings.lua
