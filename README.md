@@ -1,6 +1,6 @@
 # IkeA
 
-**Ike know every App.**
+**I know every App.**
 
 An Omarchy shell plugin that lists every open GUI window so you can switch with the keyboard. Search, arrow to the app, press Enter.
 

@@ -2,9 +2,9 @@
   "schemaVersion": 1,
   "id": "ikekavas.ikea",
   "name": "IkeA",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "author": "Ike Kavas",
-  "description": "Ike know every App — searchable switcher for running windows",
+  "description": "I know every App — searchable switcher for running windows",
   "kinds": [
     "overlay",
     "bar-widget"
@@ -16,7 +16,7 @@
   },
   "barWidget": {
     "displayName": "IkeA",
-    "description": "Ike know every App",
+    "description": "I know every App",
     "category": "Compositor",
     "allowMultiple": false,
     "defaultSection": "left"

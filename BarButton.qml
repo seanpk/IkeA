@@ -18,7 +18,7 @@ BarWidget {
     anchors.fill: parent
     bar: root.bar
     text: "󰖲"
-    tooltipText: "IkeA · Ike know every App · " + (runningCount === 1 ? "1 open window" : (runningCount + " open windows")) + " · Super+A"
+    tooltipText: "IkeA · I know every App · " + (runningCount === 1 ? "1 open window" : (runningCount + " open windows")) + " · Super+A"
     onPressed: function(b) {
       if (!root.bar) return
       root.bar.run("omarchy-shell shell toggle ikekavas.ikea")
