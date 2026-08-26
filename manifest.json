@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "ikekavas.ikea",
   "name": "IkeA",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "author": "Ike Kavas",
   "description": "I know every App — searchable switcher for running windows",
   "kinds": [

@@ -112,14 +112,22 @@ Item {
     return root.appLibrary ? root.appLibrary.entryName(entry) : (entry.name || "")
   }
 
+  // AppLibrary.iconSource() treats "/", "file://", and "image://" as image URLs.
+  function isThemedIconName(value) {
+    return /^[A-Za-z0-9][A-Za-z0-9._+-]{0,254}$/.test(String(value || ""))
+  }
+
   function desktopIcon(className, appId) {
     var entry = desktopEntry(className, appId)
     if (entry && entry.icon) return String(entry.icon)
-    return String(className || appId || "")
+    var fallback = String(className || appId || "")
+    return root.isThemedIconName(fallback) ? fallback : ""
   }
 
   function iconSource(row) {
     var iconName = desktopIcon(row.className, row.appId)
+    if (!iconName)
+      return Quickshell.iconPath("application-x-executable", true)
     if (root.appLibrary) return root.appLibrary.iconSource(iconName)
     var themed = Quickshell.iconPath(iconName, true)
     if (themed && themed.length) return themed
