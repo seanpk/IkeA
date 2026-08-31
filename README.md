@@ -2,7 +2,7 @@
 
 **I know every App.**
 
-An Omarchy shell plugin that lists every open GUI window so you can switch with the keyboard. Cards show a live screenshot of the window (so two browser profiles look different); scratchpad windows sit in a wrapping dock below. Search, arrow to the app, press Enter.
+An Omarchy shell plugin that lists every open GUI window so you can switch with the keyboard. Cards show a live screenshot of the window (so two browser profiles look different); scratchpad windows sit in a wrapping dock below. Search, arrow to the app, press Enter. Type to filter, then `Ctrl+1`–`Ctrl+9` to jump to a row.
 
 ![IkeA mill switcher](preview.png)
 
