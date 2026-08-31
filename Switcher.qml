@@ -248,13 +248,11 @@ Item {
     keyCatcher.forceActiveFocus()
   }
 
-  // Ctrl+1–9 or Alt+1–9, not both: AltGr is Ctrl+Alt on many layouts.
+  // Ctrl+1–9 only. Reject Alt so AltGr (Ctrl+Alt) does not steal layout symbols.
   function isPickModifier(event) {
     var mods = event.modifiers
-    var ctrl = !!(mods & Qt.ControlModifier)
-    var alt = !!(mods & Qt.AltModifier)
-    if (mods & (Qt.ShiftModifier | Qt.MetaModifier)) return false
-    return (ctrl && !alt) || (alt && !ctrl)
+    if (mods & (Qt.ShiftModifier | Qt.AltModifier | Qt.MetaModifier)) return false
+    return !!(mods & Qt.ControlModifier)
   }
 
   function pickKeyIndex(event) {
@@ -733,7 +731,7 @@ Item {
             Shortcut {
               enabled: root.opened
               context: Qt.WindowShortcut
-              sequences: ["Ctrl+" + (index + 1), "Alt+" + (index + 1)]
+              sequence: "Ctrl+" + (index + 1)
               autoRepeat: false
               onActivated: root.activateIndex(index)
             }

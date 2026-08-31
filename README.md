@@ -33,7 +33,7 @@ omarchy bar move ikekavas.ikea --before omarchy.active-window
 
 - Open from the bar icon, or Super+A if you bound it
 - Type to filter the mill and the scratchpad
-- Ctrl+1–9 (or Alt+1–9) switches to that row in the current (filtered) list
+- Ctrl+1–9 switches to that row in the current (filtered) list
 - Left / Right (or Tab) turn the mill; Down moves into the scratchpad dock
 - Enter or click switches to that window
 - Delete, Ctrl+W, middle-click, or right-click closes it
