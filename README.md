@@ -34,7 +34,7 @@ omarchy bar move ikekavas.ikea --before omarchy.active-window
 
 - Open from the bar icon, or Super+A if you bound it
 - Type to filter every desk
-- Ctrl+1–9 (or Alt+1–9) switches to that window in the open desk's (filtered) stack
+- Ctrl+1–9 switches to that window in the open desk's (filtered) stack
 - Left / Right turn the mill from desk to desk. Neighbor desks show as spines, so a long row of workspaces stays a tab and two spines
 - Up / Down move through the stack on the open desk. The front card is the live window; the cards behind it are title strips
 - The scratchpad is the last desk, reached with Right, not a separate dock
