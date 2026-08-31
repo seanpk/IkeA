@@ -355,6 +355,32 @@ Item {
     return 0
   }
 
+  // Ctrl+1–9 or Alt+1–9, not both: AltGr is Ctrl+Alt on many layouts.
+  function isPickModifier(event) {
+    var mods = event.modifiers
+    var ctrl = !!(mods & Qt.ControlModifier)
+    var alt = !!(mods & Qt.AltModifier)
+    if (mods & (Qt.ShiftModifier | Qt.MetaModifier)) return false
+    return (ctrl && !alt) || (alt && !ctrl)
+  }
+
+  function pickKeyIndex(event) {
+    var key = event.key
+    if (key >= Qt.Key_1 && key <= Qt.Key_9)
+      return key - Qt.Key_1
+    var t = String(event.text || "")
+    if (t.length === 1 && t >= "1" && t <= "9")
+      return t.charCodeAt(0) - 49
+    return -1
+  }
+
+  function isFilterTextKey(event) {
+    if (!event.text || event.text.length !== 1) return false
+    var code = event.text.charCodeAt(0)
+    if (code < 32 || code === 127) return false
+    return !(event.modifiers & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier))
+  }
+
   function normalizeAddress(address) {
     var a = String(address || "").trim()
     if (!a) return ""
@@ -390,6 +416,20 @@ Item {
     root.deskIndex = deskAt
     root.windowIndex = windowAt
     root.activateCurrent()
+  }
+
+  // Ctrl+N picks the Nth window in the open desk's (filtered) stack.
+  function activateIndex(index) {
+    var desk = root.currentDesk()
+    if (!desk) return
+    var count = (desk.windows || []).length
+    var section = desk.scratch ? "scratch" : "mill"
+    if (Model.pickFilteredIndex(section, index, desk.scratch ? 0 : count, desk.scratch ? count : 0) < 0) return
+    root.activateAt(root.deskIndex, index)
+  }
+
+  function pickLabel(index) {
+    return index >= 0 && index < 9 ? "Ctrl+" + (index + 1) : ""
   }
 
   function closeCurrent() {
@@ -445,6 +485,7 @@ Item {
     property string title: ""
     property string badge: ""
     property string profileName: ""
+    property string shortcutText: ""
     property url icon
     property bool selected: false
     property bool urgent: false
@@ -549,15 +590,31 @@ Item {
         anchors.bottomMargin: Style.space(8)
         spacing: 1
 
-        Text {
+        Row {
           width: parent.width
-          text: plaque.caption
-          textFormat: Text.PlainText
-          color: plaque.selected ? root.selectedText : root.foreground
-          font.family: root.fontFamily
-          font.pixelSize: Style.font.body
-          font.bold: true
-          elide: Text.ElideRight
+          spacing: Style.space(6)
+
+          Text {
+            id: nameShortcut
+            visible: plaque.shortcutText.length > 0
+            text: plaque.shortcutText
+            textFormat: Text.PlainText
+            color: plaque.selected ? root.selectedText : root.foreground
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.body
+            font.bold: true
+          }
+
+          Text {
+            width: parent.width - (nameShortcut.visible ? nameShortcut.implicitWidth + parent.spacing : 0)
+            text: plaque.caption
+            textFormat: Text.PlainText
+            color: plaque.selected ? root.selectedText : root.foreground
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.body
+            font.bold: true
+            elide: Text.ElideRight
+          }
         }
 
         Text {
@@ -686,12 +743,16 @@ Item {
         onClicked: keyCatcher.forceActiveFocus()
       }
 
-      FocusScope {
+      Item {
         id: keyCatcher
         anchors.fill: parent
         focus: true
 
         Keys.priority: Keys.BeforeItem
+        Keys.onShortcutOverride: function(event) {
+          if (root.isPickModifier(event) && root.pickKeyIndex(event) >= 0)
+            event.accepted = true
+        }
         Keys.onPressed: function(event) {
           var lateral = Util.readingKey(event)
           if (event.key === Qt.Key_Escape) {
@@ -700,6 +761,9 @@ Item {
             event.accepted = true
           } else if (event.key === Qt.Key_Delete || ((event.key === Qt.Key_W) && (event.modifiers & Qt.ControlModifier))) {
             root.closeCurrent()
+            event.accepted = true
+          } else if (root.isPickModifier(event) && root.pickKeyIndex(event) >= 0) {
+            root.activateIndex(root.pickKeyIndex(event))
             event.accepted = true
           } else if (Util.editsFilter(event, root.filterText)) {
             root.setFilter(Util.editedFilter(event, root.filterText))
@@ -730,9 +794,23 @@ Item {
           } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter || event.key === Qt.Key_Space) {
             root.activateCurrent()
             event.accepted = true
-          } else if (event.text && event.text.length === 1 && event.text.charCodeAt(0) >= 32 && event.text.charCodeAt(0) !== 127) {
+          } else if (root.isFilterTextKey(event)) {
             root.setFilter(root.filterText + event.text)
             event.accepted = true
+          }
+        }
+
+        Repeater {
+          model: 9
+          Item {
+            required property int index
+            Shortcut {
+              enabled: root.opened
+              context: Qt.WindowShortcut
+              sequences: ["Ctrl+" + (index + 1), "Alt+" + (index + 1)]
+              autoRepeat: false
+              onActivated: root.activateIndex(index)
+            }
           }
         }
       }
@@ -967,6 +1045,7 @@ Item {
                     title: win.row ? win.row.title : ""
                     badge: win.row && win.row.activated ? strings.t("badge.now") : ""
                     profileName: win.row ? (win.row.profileName || "") : ""
+                    shortcutText: root.pickLabel(win.index)
                     icon: win.row ? win.row.icon : ""
                     selected: true
                     urgent: win.row ? win.row.urgent === true : false
@@ -1011,7 +1090,8 @@ Item {
                         Text {
                           width: parent.width
                           text: win.row
-                            ? (win.row.prettyName + (win.row.profileName ? " · " + win.row.profileName : ""))
+                            ? ((win.index < 9 ? root.pickLabel(win.index) + "  " : "")
+                              + win.row.prettyName + (win.row.profileName ? " · " + win.row.profileName : ""))
                             : ""
                           textFormat: Text.PlainText
                           color: root.foreground

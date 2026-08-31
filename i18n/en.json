@@ -2,7 +2,7 @@
   "search.placeholder": "Search desks…",
   "search.empty": "No desk matches for “%1”",
   "mill.empty": "No open windows",
-  "hint": "← → desk    ↑ ↓ window    Enter open    Delete close    Esc",
+  "hint": "Ctrl+1–9 pick    ← → desk    ↑ ↓ window    Enter open    Delete close    Esc",
   "desk.kind": "Desk",
   "desk.scratch": "Scratch",
   "desk.scratchKind": "Scratchpad",
