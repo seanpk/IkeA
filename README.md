@@ -2,7 +2,7 @@
 
 **I know every App.**
 
-An Omarchy shell plugin that lists every open GUI window so you can switch with the keyboard. The mill turns by workspace: left and right move from desk to desk, and the open desk holds a stack of its windows. The front card is a live screenshot (so two browser profiles look different). Up and down move through that stack. The scratchpad is the last desk on the mill. Search, arrow to the window, press Enter.
+An Omarchy shell plugin that lists every open GUI window so you can switch with the keyboard. The mill turns by workspace: left and right move from desk to desk, and the open desk holds a stack of its windows. The front card is a live screenshot (so two browser profiles look different). Up and down move through that stack. The scratchpad is the last desk on the mill. Search, arrow to the window, press Enter. Type to filter, then `Ctrl+1`–`Ctrl+9` to jump to a window in the open stack.
 
 ![IkeA mill switcher](preview.png)
 
