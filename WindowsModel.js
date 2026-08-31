@@ -164,6 +164,14 @@ function windowCount(hyprland) {
   return collectWindows(hyprland).length
 }
 
+// Ctrl+1–9. index is into the focused section's already-filtered model.
+function pickFilteredIndex(section, index, millCount, scratchCount) {
+  if (typeof index !== "number" || index < 0 || index > 8) return -1
+  var count = section === "scratch" ? scratchCount : millCount
+  if (typeof count !== "number" || index >= count) return -1
+  return index
+}
+
 if (typeof module !== "undefined") {
   module.exports = {
     collectWindows: collectWindows,
@@ -176,6 +184,7 @@ if (typeof module !== "undefined") {
     workspaceInfo: workspaceInfo,
     browserProfile: browserProfile,
     waylandFor: waylandFor,
-    aspectRatioFor: aspectRatioFor
+    aspectRatioFor: aspectRatioFor,
+    pickFilteredIndex: pickFilteredIndex
   }
 }
