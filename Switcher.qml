@@ -98,27 +98,13 @@ Item {
 
   function desktopEntry(className, appId) {
     var values = DesktopEntries.applications ? (DesktopEntries.applications.values || []) : []
-    var needles = [String(className || "").toLowerCase(), String(appId || "").toLowerCase()]
-    for (var i = 0; i < values.length; i++) {
-      var entry = values[i]
-      var id = String((entry && entry.id) || "").toLowerCase()
-      var icon = String((entry && entry.icon) || "").toLowerCase()
-      var name = String((entry && entry.name) || "").toLowerCase()
-      var idTail = id.split(".").pop()
-      if (!id && !icon) continue
-      for (var n = 0; n < needles.length; n++) {
-        var needle = needles[n]
-        if (!needle) continue
-        var needleTail = needle.split(".").pop()
-        if (id === needle || idTail === needle || id === needleTail || idTail === needleTail)
-          return entry
-        if (icon === needle || icon === needleTail)
-          return entry
-        if (name === needle || name === needleTail)
-          return entry
+    return Model.findDesktopEntry(className, appId, values, function(name) {
+      try {
+        return DesktopEntries.heuristicLookup(name)
+      } catch (e) {
+        return null
       }
-    }
-    return null
+    })
   }
 
   function desktopName(className, appId) {

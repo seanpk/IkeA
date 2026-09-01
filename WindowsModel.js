@@ -18,6 +18,7 @@ function shouldSkip(toplevel) {
 }
 
 function prettyApp(className, appId, desktopName) {
+  if (desktopName) return desktopName
   var raw = String(className || appId || "")
   var chrome = raw.match(/^chrome-(.+)__-/)
   if (chrome) {
@@ -29,7 +30,8 @@ function prettyApp(className, appId, desktopName) {
     if (!label) label = host
     return label.charAt(0).toUpperCase() + label.slice(1)
   }
-  if (desktopName) return desktopName
+  var info = chromeWebAppInfo(className) || chromeWebAppInfo(appId)
+  if (info && info.host) return info.host
   var last = raw.split(".").pop()
   last = last.replace(/-/g, " ").replace(/_/g, " ")
   if (!last) return "App"
@@ -81,6 +83,110 @@ function isScratchpad(ws) {
   if (typeof ws.id === "number" && ws.id < 0) return true
   var name = String(ws.name || "").toLowerCase()
   return name.indexOf("special") === 0 || name.indexOf("scratch") !== -1
+}
+
+// Chromium --app= windows advertise
+// `chrome-<host>_<path>-<profile>` (slashes in the path become `_`,
+// spaces in the profile directory become `_`). Regular browser windows
+// stay `chromium` on Wayland, with no per-profile app id.
+function chromeWebAppInfo(className) {
+  var raw = String(className || "")
+  if (raw.indexOf("chrome-") !== 0) return null
+  var rest = raw.slice("chrome-".length)
+  var match = rest.match(/^(.*)-(Default|Profile_\d+|Guest_Profile)$/)
+  if (!match) return null
+  var appPart = match[1]
+  if (!appPart) return null
+  var host = appPart.split("_")[0]
+  if (!host || host.indexOf(".") < 0) return null
+  return {
+    host: host,
+    appPart: appPart,
+    profile: match[2].replace(/_/g, " "),
+    className: raw
+  }
+}
+
+function hostsInExec(execString) {
+  var exec = String(execString || "")
+  var hosts = []
+  var re = /https?:\/\/([^\/\s"'\\]+)/gi
+  var m
+  while ((m = re.exec(exec))) {
+    var host = m[1].split(":")[0].toLowerCase()
+    if (host) hosts.push(host)
+  }
+  return hosts
+}
+
+function execHasHost(execString, host) {
+  var want = String(host || "").toLowerCase()
+  if (!want) return false
+  var hosts = hostsInExec(execString)
+  for (var i = 0; i < hosts.length; i++) {
+    if (hosts[i] === want) return true
+  }
+  return false
+}
+
+function profileFromExec(execString) {
+  var exec = String(execString || "")
+  var m = exec.match(/--profile-directory=(?:"([^"]+)"|'([^']+)'|(\S+))/)
+  if (!m) return ""
+  return m[1] || m[2] || m[3] || ""
+}
+
+function normalizeProfile(value) {
+  return String(value || "").replace(/_/g, " ").toLowerCase()
+}
+
+// Resolve a running window to a .desktop entry.
+// Prefer Quickshell's heuristicLookup (id, then StartupWMClass). Never match
+// by Icon= — every Chromium profile launcher shares Icon=chromium, so that
+// would label every browser window with whichever profile file came first.
+function findDesktopEntry(className, appId, entries, heuristicLookup) {
+  var seen = {}
+  var needles = [className, appId]
+  for (var i = 0; i < needles.length; i++) {
+    var needle = String(needles[i] || "")
+    if (!needle || seen[needle]) continue
+    seen[needle] = true
+    if (typeof heuristicLookup === "function") {
+      var looked = heuristicLookup(needle)
+      if (looked) return looked
+    }
+    if (!entries) continue
+    var needleLower = needle.toLowerCase()
+    var idHit = null
+    var startupHits = []
+    for (var j = 0; j < entries.length; j++) {
+      var entry = entries[j]
+      var id = String((entry && entry.id) || "")
+      var startup = String((entry && entry.startupClass) || "")
+      if (id && id.toLowerCase() === needleLower) idHit = entry
+      if (startup && startup.toLowerCase() === needleLower) startupHits.push(entry)
+    }
+    if (idHit) return idHit
+    if (startupHits.length === 1) return startupHits[0]
+    for (var s = 0; s < startupHits.length; s++) {
+      if (String(startupHits[s].id || "").toLowerCase() === needleLower) return startupHits[s]
+    }
+  }
+
+  var info = chromeWebAppInfo(className) || chromeWebAppInfo(appId)
+  if (!info || !entries) return null
+  var hostBest = null
+  var profileBest = null
+  var infoProfile = normalizeProfile(info.profile)
+  for (var k = 0; k < entries.length; k++) {
+    var candidate = entries[k]
+    if (!execHasHost(candidate && candidate.execString, info.host)) continue
+    hostBest = candidate
+    var execProfile = profileFromExec(candidate.execString)
+    if (execProfile && normalizeProfile(execProfile) === infoProfile)
+      profileBest = candidate
+  }
+  return profileBest || hostBest
 }
 
 function collectWindows(hyprland) {
@@ -178,6 +284,11 @@ if (typeof module !== "undefined") {
     partitionWindows: partitionWindows,
     matchesFilter: matchesFilter,
     prettyApp: prettyApp,
+    chromeWebAppInfo: chromeWebAppInfo,
+    hostsInExec: hostsInExec,
+    execHasHost: execHasHost,
+    profileFromExec: profileFromExec,
+    findDesktopEntry: findDesktopEntry,
     findToplevel: findToplevel,
     windowCount: windowCount,
     isScratchpad: isScratchpad,
