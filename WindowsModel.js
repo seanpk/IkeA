@@ -6,8 +6,9 @@ function ipcClass(toplevel) {
 function shouldSkip(toplevel) {
   if (!toplevel) return true
   var ipc = toplevel.lastIpcObject || {}
-  if (ipc.hidden === true) return true
   if (ipc.mapped === false) return true
+  var ws = workspaceInfo(toplevel)
+  if (ipc.hidden === true && !isScratchpad(ws)) return true
   var className = ipcClass(toplevel)
   var skip = {
     "xwaylandvideobridge": true,
@@ -17,12 +18,69 @@ function shouldSkip(toplevel) {
 }
 
 function prettyApp(className, appId, desktopName) {
+  var raw = String(className || appId || "")
+  var chrome = raw.match(/^chrome-(.+)__-/)
+  if (chrome) {
+    var host = chrome[1]
+    var parts = host.split(".")
+    var label = parts[0]
+    if (label === "www" || label === "web" || label === "app" || label === "m")
+      label = parts.length > 1 ? parts[1] : label
+    if (!label) label = host
+    return label.charAt(0).toUpperCase() + label.slice(1)
+  }
   if (desktopName) return desktopName
-  var raw = String(className || appId || "App")
   var last = raw.split(".").pop()
   last = last.replace(/-/g, " ").replace(/_/g, " ")
   if (!last) return "App"
   return last.charAt(0).toUpperCase() + last.slice(1)
+}
+
+function browserProfile(className, appId, title) {
+  var raw = String(className || appId || "")
+  var tagged = raw.match(/__-([A-Za-z0-9][A-Za-z0-9 _.-]*)$/)
+  if (tagged) {
+    var name = tagged[1].replace(/[_-]+/g, " ").trim()
+    if (name.toLowerCase() === "default") return "Default"
+    return name
+  }
+  var t = String(title || "")
+  var numbered = t.match(/\bProfile \d+\b/i)
+  if (numbered) return numbered[0]
+  return ""
+}
+
+function waylandFor(toplevel) {
+  return toplevel && toplevel.wayland ? toplevel.wayland : null
+}
+
+function aspectRatioFor(ipc) {
+  var size = (ipc && ipc.size) || []
+  var width = Number(size[0])
+  var height = Number(size[1])
+  if (!isFinite(width) || !isFinite(height) || width <= 0 || height <= 0)
+    return 1.6
+  return Math.max(0.55, Math.min(2.6, width / height))
+}
+
+function workspaceInfo(toplevel) {
+  var ipc = (toplevel && toplevel.lastIpcObject) || {}
+  var ws = toplevel ? toplevel.workspace : null
+  var ipcWs = ipc.workspace || {}
+  var id = 0
+  if (ws && typeof ws.id === "number") id = ws.id
+  else if (typeof ipcWs.id === "number") id = ipcWs.id
+  var name = ""
+  if (ws && ws.name) name = String(ws.name)
+  else if (ipcWs.name) name = String(ipcWs.name)
+  return { id: id, name: name }
+}
+
+function isScratchpad(ws) {
+  if (!ws) return false
+  if (typeof ws.id === "number" && ws.id < 0) return true
+  var name = String(ws.name || "").toLowerCase()
+  return name.indexOf("special") === 0 || name.indexOf("scratch") !== -1
 }
 
 function collectWindows(hyprland) {
@@ -43,18 +101,23 @@ function collectWindows(hyprland) {
     if (!className) className = appId
     var title = String(t.title || ipc.title || "")
     if (!className && !title) continue
-    var ws = t.workspace
+    var ws = workspaceInfo(t)
     out.push({
       address: String(t.address || ""),
       title: title,
       className: className,
       appId: appId || className,
-      workspaceId: ws && ws.id ? ws.id : 0,
+      workspaceId: ws.id,
+      workspaceName: ws.name,
+      scratchpad: isScratchpad(ws),
+      profileName: browserProfile(className, appId, title),
+      aspectRatio: aspectRatioFor(ipc),
       activated: t.activated === true,
       urgent: t.urgent === true
     })
   }
   out.sort(function(a, b) {
+    if (a.scratchpad !== b.scratchpad) return a.scratchpad ? 1 : -1
     if (a.activated !== b.activated) return a.activated ? -1 : 1
     if (a.workspaceId !== b.workspaceId) return a.workspaceId - b.workspaceId
     var an = (a.className + a.title).toLowerCase()
@@ -66,10 +129,24 @@ function collectWindows(hyprland) {
   return out
 }
 
+function partitionWindows(rows) {
+  var mill = []
+  var scratch = []
+  for (var i = 0; i < (rows || []).length; i++) {
+    if (rows[i].scratchpad) scratch.push(rows[i])
+    else mill.push(rows[i])
+  }
+  return { mill: mill, scratch: scratch }
+}
+
 function matchesFilter(row, query) {
   var q = String(query || "").trim().toLowerCase()
   if (!q) return true
-  var blob = [row.prettyName, row.title, row.className, row.appId, "ws" + row.workspaceId].join(" ").toLowerCase()
+  var blob = [
+    row.prettyName, row.title, row.className, row.appId, row.profileName,
+    "ws" + row.workspaceId, row.workspaceName,
+    row.scratchpad ? "scratchpad scratch special" : ""
+  ].join(" ").toLowerCase()
   return blob.indexOf(q) !== -1
 }
 
@@ -90,9 +167,15 @@ function windowCount(hyprland) {
 if (typeof module !== "undefined") {
   module.exports = {
     collectWindows: collectWindows,
+    partitionWindows: partitionWindows,
     matchesFilter: matchesFilter,
     prettyApp: prettyApp,
     findToplevel: findToplevel,
-    windowCount: windowCount
+    windowCount: windowCount,
+    isScratchpad: isScratchpad,
+    workspaceInfo: workspaceInfo,
+    browserProfile: browserProfile,
+    waylandFor: waylandFor,
+    aspectRatioFor: aspectRatioFor
   }
 }
