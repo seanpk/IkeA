@@ -5,6 +5,7 @@ import Quickshell.Wayland
 import QtQuick
 import QtQuick.Effects
 import qs.Commons
+import qs.Commons as Commons
 import qs.Ui
 import "WindowsModel.js" as Model
 
@@ -19,17 +20,15 @@ Item {
 
   property bool opened: false
   property string filterText: ""
-  property string focusSection: "mill"
-  property int millIndex: 0
-  property int scratchIndex: 0
-  property bool cursorActive: false
+  property var desks: []
+  property int deskIndex: 0
+  property int windowIndex: 0
   property bool preferNextOnOpen: false
   property bool caretOn: true
 
   property color background: Color.menu.background
   property color foreground: Color.menu.text
   property color border: Color.menu.border
-  property var borderSpec: Border.surfaceSpec("menu", "border", border, Math.max(1, Style.space(2)))
   property color scrim: Color.menu.scrim
   property color selectedBackground: Color.menu.selectedBackground
   property color selectedText: Color.menu.selectedText
@@ -38,36 +37,25 @@ Item {
   readonly property int cornerRadius: Math.max(Style.cornerRadius, Style.space(18))
   property string fontFamily: Style.font.menuFamily
 
-  readonly property int millMaxW: Style.space(340)
-  readonly property int millMaxH: Style.space(200)
-  readonly property int scratchMaxW: Style.space(220)
-  readonly property int scratchMaxH: Style.space(124)
-
-  function fitCardW(aspect, maxW, maxH) {
-    var ar = Number(aspect)
-    if (!isFinite(ar) || ar <= 0) ar = 1.6
-    var w = maxW
-    var h = w / ar
-    if (h > maxH) w = maxH * ar
-    return Math.round(w)
+  readonly property int cardW: Math.min(Style.space(420), Math.max(Style.space(280), Math.round(millView.width * 0.46)))
+  readonly property int cardH: Math.min(Style.space(230), Math.max(Style.space(140), Math.round(millView.height * 0.48)))
+  readonly property int stripH: Style.space(44)
+  readonly property int spineW: Style.space(132)
+  readonly property int stackDepth: {
+    var gap = Style.space(8)
+    var room = (millView.height - root.cardH) / 2 - Style.space(14)
+    if (room < root.stripH) return 0
+    return Math.min(3, Math.floor((room + gap) / (root.stripH + gap)))
   }
 
-  function fitCardH(aspect, maxW, maxH) {
-    var w = fitCardW(aspect, maxW, maxH)
-    var ar = Number(aspect)
-    if (!isFinite(ar) || ar <= 0) ar = 1.6
-    return Math.round(w / ar)
-  }
+  Commons.Translations { id: strings; directory: Qt.resolvedUrl("i18n") }
 
   function open(payloadJson) {
     root.opened = true
     root.filterText = ""
-    root.millIndex = 0
-    root.scratchIndex = 0
-    root.focusSection = "mill"
-    root.cursorActive = true
+    root.deskIndex = 0
+    root.windowIndex = 0
     root.preferNextOnOpen = true
-    root.disarmPointer()
     if (Hyprland.refreshToplevels) Hyprland.refreshToplevels()
     if (root.appLibrary && root.appLibrary.refreshIcons) root.appLibrary.refreshIcons()
     root.rebuild()
@@ -154,102 +142,197 @@ Item {
 
   function decorate(row) {
     row.prettyName = Model.prettyApp(row.className, row.appId, desktopName(row.className, row.appId))
+    row.icon = String(root.iconSource(row) || "")
     return row
   }
 
-  function fillModel(model, rows) {
-    model.clear()
-    for (var i = 0; i < rows.length; i++) model.append(rows[i])
+  function focusedWorkspaceId() {
+    var ws = Hyprland.focusedWorkspace
+    if (ws && typeof ws.id === "number") return ws.id
+    return 0
+  }
+
+  function currentDesk() {
+    if (root.deskIndex < 0 || root.deskIndex >= root.desks.length) return null
+    return root.desks[root.deskIndex]
+  }
+
+  function currentWindow() {
+    var desk = root.currentDesk()
+    if (!desk) return null
+    var windows = desk.windows || []
+    if (root.windowIndex < 0 || root.windowIndex >= windows.length) return null
+    return windows[root.windowIndex]
+  }
+
+  function findAddress(desks, address) {
+    var needle = String(address || "")
+    if (!needle) return null
+    for (var i = 0; i < desks.length; i++) {
+      var windows = desks[i].windows || []
+      for (var j = 0; j < windows.length; j++) {
+        if (String(windows[j].address || "") === needle)
+          return { deskIndex: i, windowIndex: j }
+      }
+    }
+    return null
+  }
+
+  function deskIndexForWorkspace(desks, id) {
+    for (var i = 0; i < desks.length; i++) {
+      if (!desks[i].scratch && desks[i].workspaceId === id) return i
+    }
+    return -1
+  }
+
+  function placeOnOpen(desks) {
+    var nextDesk = 0
+    var focusId = root.focusedWorkspaceId()
+    var match = root.deskIndexForWorkspace(desks, focusId)
+    var active = Hyprland.activeToplevel
+    var activeAddress = active ? String(active.address || "") : ""
+    if (match >= 0) nextDesk = match
+    else {
+      var found = root.findAddress(desks, activeAddress)
+      if (found) nextDesk = found.deskIndex
+    }
+    var windows = desks[nextDesk] ? (desks[nextDesk].windows || []) : []
+    var nextWindow = 0
+    for (var i = 0; i < windows.length; i++) {
+      if (windows[i].activated || String(windows[i].address || "") === activeAddress)
+        nextWindow = i
+    }
+    if (windows.length > 1) nextWindow = (nextWindow + 1) % windows.length
+    return { deskIndex: nextDesk, windowIndex: nextWindow }
   }
 
   function rebuild() {
     var collected = Model.collectWindows(Hyprland)
-    var mill = []
-    var scratch = []
+    var rows = []
     for (var i = 0; i < collected.length; i++) {
-      var row = decorate(collected[i])
+      var row = root.decorate(collected[i])
       if (!Model.matchesFilter(row, root.filterText)) continue
-      if (row.scratchpad) scratch.push(row)
-      else mill.push(row)
+      rows.push(row)
     }
+    var nextDesks = Model.groupDesks(rows)
 
-    var keepMill = ""
-    var keepScratch = ""
+    var keepAddress = ""
+    var keepDesk = ""
+    var keepWindow = root.windowIndex
     if (!root.preferNextOnOpen) {
-      if (millModel.count > 0 && millIndex >= 0 && millIndex < millModel.count)
-        keepMill = String(millModel.get(millIndex).address || "")
-      if (scratchModel.count > 0 && scratchIndex >= 0 && scratchIndex < scratchModel.count)
-        keepScratch = String(scratchModel.get(scratchIndex).address || "")
+      var current = root.currentWindow()
+      if (current) keepAddress = String(current.address || "")
+      var desk = root.currentDesk()
+      if (desk) keepDesk = String(desk.key || "")
     }
 
-    fillModel(millModel, mill)
-    fillModel(scratchModel, scratch)
-
-    var nextMill = 0
-    var nextScratch = 0
-    for (var j = 0; j < mill.length; j++) {
-      if (keepMill && String(mill[j].address) === keepMill) nextMill = j
+    var nextDesk = 0
+    var nextWindow = 0
+    if (nextDesks.length > 0 && root.preferNextOnOpen) {
+      var placed = root.placeOnOpen(nextDesks)
+      nextDesk = placed.deskIndex
+      nextWindow = placed.windowIndex
+    } else if (nextDesks.length > 0) {
+      var kept = root.findAddress(nextDesks, keepAddress)
+      if (kept) {
+        nextDesk = kept.deskIndex
+        nextWindow = kept.windowIndex
+      } else {
+        for (var d = 0; d < nextDesks.length; d++) {
+          if (keepDesk && nextDesks[d].key === keepDesk) nextDesk = d
+        }
+        var remaining = nextDesks[nextDesk].windows || []
+        nextWindow = remaining.length === 0 ? 0 : Math.min(keepWindow, remaining.length - 1)
+      }
     }
-    for (var k = 0; k < scratch.length; k++) {
-      if (keepScratch && String(scratch[k].address) === keepScratch) nextScratch = k
-    }
 
-    if (root.preferNextOnOpen) {
-      root.preferNextOnOpen = false
-      nextMill = mill.length > 1 ? 1 : 0
-    }
-
-    millIndex = mill.length === 0 ? 0 : Math.min(nextMill, mill.length - 1)
-    scratchIndex = scratch.length === 0 ? 0 : Math.min(nextScratch, scratch.length - 1)
-
-    if (focusSection === "mill" && mill.length === 0 && scratch.length > 0)
-      focusSection = "scratch"
-    else if (focusSection === "scratch" && scratch.length === 0 && mill.length > 0)
-      focusSection = "mill"
-
-    cursorActive = mill.length + scratch.length > 0
+    root.preferNextOnOpen = false
+    root.desks = nextDesks
+    root.deskIndex = nextDesk
+    root.windowIndex = nextWindow
+    Qt.callLater(root.centerTab)
   }
 
   function setFilter(nextFilter) {
     root.filterText = nextFilter
     root.preferNextOnOpen = false
-    root.disarmPointer()
     root.rebuild()
   }
 
-  function millDist(index) {
-    var n = millModel.count
-    if (n <= 1) return index - millIndex
-    var d = index - millIndex
-    var half = Math.floor(n / 2)
-    if (d > half) d -= n
-    if (d < -half) d += n
-    return d
+  function centerTab() {
+    if (!deskTabs || root.desks.length === 0) return
+    deskTabs.positionViewAtIndex(root.deskIndex, ListView.Center)
   }
 
-  function select(delta) {
-    root.disarmPointer()
-    root.cursorActive = true
-    if (root.focusSection === "scratch") {
-      if (scratchModel.count === 0) return
-      scratchIndex = (scratchIndex + delta + scratchModel.count) % scratchModel.count
-    } else {
-      if (millModel.count === 0) return
-      millIndex = (millIndex + delta + millModel.count) % millModel.count
+  function focusDesk(index) {
+    if (root.desks.length === 0) return
+    var n = root.desks.length
+    var next = ((index % n) + n) % n
+    root.deskIndex = next
+    var windows = root.desks[next].windows || []
+    var win = 0
+    for (var i = 0; i < windows.length; i++) {
+      if (windows[i].activated) win = i
     }
+    root.windowIndex = windows.length === 0 ? 0 : win
+    root.centerTab()
     keyCatcher.forceActiveFocus()
   }
 
-  function moveSection(dir) {
-    if (dir > 0 && focusSection === "mill" && scratchModel.count > 0)
-      focusSection = "scratch"
-    else if (dir < 0 && focusSection === "scratch" && millModel.count > 0)
-      focusSection = "mill"
+  function moveDesk(delta) {
+    root.focusDesk(root.deskIndex + delta)
+  }
+
+  function focusWindow(index) {
+    var desk = root.currentDesk()
+    if (!desk) return
+    var n = (desk.windows || []).length
+    if (n === 0) return
+    root.windowIndex = Math.max(0, Math.min(n - 1, index))
     keyCatcher.forceActiveFocus()
   }
 
-  function disarmPointer() {
-    pointerGate.reset()
+  function moveWindow(delta) {
+    root.focusWindow(root.windowIndex + delta)
+  }
+
+  function deskMark(desk) {
+    if (!desk) return ""
+    if (desk.scratch) return strings.t("desk.scratchMark")
+    var name = String(desk.workspaceName || "")
+    if (name && name !== String(desk.workspaceId)) return name
+    return String(desk.workspaceId)
+  }
+
+  function deskTab(desk) {
+    if (!desk) return ""
+    if (desk.scratch) return strings.t("desk.scratch")
+    return root.deskMark(desk)
+  }
+
+  function deskX(dist, itemWidth) {
+    var gap = Style.space(28)
+    var travel = (root.cardW + root.spineW) / 2 + gap
+    var signed = LayoutMirroring.enabled ? -dist : dist
+    return (millView.width - itemWidth) / 2 + signed * travel
+  }
+
+  function stackY(delta) {
+    var gap = Style.space(8)
+    var mid = millView.height / 2
+    if (delta === 0) return mid - root.cardH / 2
+    if (delta > 0)
+      return mid + root.cardH / 2 + gap + (delta - 1) * (root.stripH + gap)
+    var above = -delta
+    return mid - root.cardH / 2 - gap - above * (root.stripH + gap)
+  }
+
+  function hiddenBeyond(delta, count) {
+    if (delta >= root.stackDepth && delta > 0)
+      return Math.max(0, count - (root.windowIndex + root.stackDepth) - 1)
+    if (delta <= -root.stackDepth && delta < 0)
+      return Math.max(0, root.windowIndex - root.stackDepth)
+    return 0
   }
 
   function normalizeAddress(address) {
@@ -275,39 +358,24 @@ Item {
     Quickshell.execDetached(["hyprctl", "dispatch", request])
   }
 
-  function currentRow() {
-    if (focusSection === "scratch") {
-      if (scratchIndex < 0 || scratchIndex >= scratchModel.count) return null
-      return scratchModel.get(scratchIndex)
-    }
-    if (millIndex < 0 || millIndex >= millModel.count) return null
-    return millModel.get(millIndex)
-  }
-
   function activateCurrent() {
-    var row = currentRow()
+    var row = root.currentWindow()
     if (!row) return
     pendingFocus.address = String(row.address || "")
     root.dismiss()
     pendingFocus.restart()
   }
 
-  function activateMill(index) {
-    focusSection = "mill"
-    millIndex = index
-    activateCurrent()
-  }
-
-  function activateScratch(index) {
-    focusSection = "scratch"
-    scratchIndex = index
-    activateCurrent()
+  function activateAt(deskAt, windowAt) {
+    root.deskIndex = deskAt
+    root.windowIndex = windowAt
+    root.activateCurrent()
   }
 
   function closeCurrent() {
-    var row = currentRow()
+    var row = root.currentWindow()
     if (!row) return
-    closeAddress(String(row.address || ""))
+    root.closeAddress(String(row.address || ""))
   }
 
   function closeAddress(address) {
@@ -317,14 +385,6 @@ Item {
     }
     root.dispatchClose(address)
     Qt.callLater(root.rebuild)
-  }
-
-  ListModel { id: millModel }
-  ListModel { id: scratchModel }
-
-  PointerMoveGate {
-    id: pointerGate
-    referenceItem: hull
   }
 
   Timer {
@@ -368,9 +428,9 @@ Item {
     property url icon
     property bool selected: false
     property bool urgent: false
-    property bool compact: false
+    property bool showShot: false
 
-    readonly property int frameRadius: Style.space(plaque.compact ? 12 : 16)
+    readonly property int frameRadius: Style.space(16)
     readonly property string caption: {
       var bits = [plaque.prettyName]
       if (plaque.profileName) bits.push(plaque.profileName)
@@ -394,7 +454,7 @@ Item {
 
       Image {
         anchors.centerIn: parent
-        width: plaque.compact ? Style.space(28) : Style.space(40)
+        width: Style.space(40)
         height: width
         fillMode: Image.PreserveAspectFit
         source: plaque.icon
@@ -410,11 +470,16 @@ Item {
         layer.enabled: true
         layer.smooth: true
 
-        ScreencopyView {
+        Loader {
           anchors.fill: parent
-          captureSource: root.captureSource(plaque.address)
-          live: root.opened
-          paintCursor: false
+          active: plaque.showShot && root.opened
+          sourceComponent: Component {
+            ScreencopyView {
+              captureSource: root.captureSource(plaque.address)
+              live: root.opened && plaque.showShot
+              paintCursor: false
+            }
+          }
         }
       }
     }
@@ -443,7 +508,7 @@ Item {
       anchors.left: shot.left
       anchors.right: shot.right
       anchors.bottom: shot.bottom
-      height: Math.min(shot.height * 0.38, Style.space(plaque.compact ? 40 : 52))
+      height: Math.min(shot.height * 0.38, Style.space(52))
       radius: plaque.frameRadius
       z: 2
       gradient: Gradient {
@@ -467,7 +532,7 @@ Item {
           textFormat: Text.PlainText
           color: plaque.selected ? root.selectedText : root.foreground
           font.family: root.fontFamily
-          font.pixelSize: plaque.compact ? Style.font.caption : Style.font.body
+          font.pixelSize: Style.font.body
           font.bold: true
           elide: Text.ElideRight
         }
@@ -475,9 +540,7 @@ Item {
         Text {
           width: parent.width
           visible: plaque.title.length > 0 || plaque.badge.length > 0
-          text: plaque.compact
-            ? plaque.badge
-            : ((plaque.badge ? plaque.badge + "  ·  " : "") + (plaque.title || "Untitled"))
+          text: (plaque.badge ? plaque.badge + "  ·  " : "") + (plaque.title || "")
           textFormat: Text.PlainText
           color: root.muted
           font.family: root.fontFamily
@@ -547,18 +610,17 @@ Item {
       height: Math.min(panel.height - Style.gapsOut * 2, Style.space(720))
       anchors.centerIn: parent
 
-      // Mill / paddle-wheel silhouette in theme colors
       Repeater {
         model: 9
         Rectangle {
           required property int index
-          width: hull.width * 0.08
-          height: hull.height * 0.42
+          width: hull.width * 0.055
+          height: hull.height * 0.36
           radius: width / 2
-          color: Qt.rgba(root.accent.r, root.accent.g, root.accent.b, 0.07 + (index % 2) * 0.03)
+          color: Qt.rgba(root.accent.r, root.accent.g, root.accent.b, 0.05 + (index % 2) * 0.02)
           anchors.horizontalCenter: hull.horizontalCenter
           anchors.verticalCenter: hull.verticalCenter
-          anchors.verticalCenterOffset: -hull.height * 0.06
+          anchors.verticalCenterOffset: -hull.height * 0.02
           transformOrigin: Item.Bottom
           rotation: index * 20 - 80
         }
@@ -594,19 +656,6 @@ Item {
             color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.06 + (index % 2) * 0.03)
           }
         }
-
-        Rectangle {
-          anchors.left: parent.left
-          anchors.right: parent.right
-          anchors.bottom: parent.bottom
-          height: parent.height * 0.28
-          radius: parent.radius
-          gradient: Gradient {
-            GradientStop { position: 0.0; color: "transparent" }
-            GradientStop { position: 0.35; color: Qt.rgba(root.accent.r, root.accent.g, root.accent.b, 0.10) }
-            GradientStop { position: 1.0; color: Qt.rgba(root.background.r, root.background.g, root.background.b, 0.92) }
-          }
-        }
       }
 
       MouseArea {
@@ -621,6 +670,7 @@ Item {
 
         Keys.priority: Keys.BeforeItem
         Keys.onPressed: function(event) {
+          var lateral = Util.readingKey(event)
           if (event.key === Qt.Key_Escape) {
             if (root.filterText) root.setFilter("")
             else root.dismiss()
@@ -632,33 +682,27 @@ Item {
             root.setFilter(Util.editedFilter(event, root.filterText))
             event.accepted = true
           } else if (event.key === Qt.Key_Tab) {
-            root.select((event.modifiers & Qt.ShiftModifier) ? -1 : 1)
+            root.moveWindow((event.modifiers & Qt.ShiftModifier) ? -1 : 1)
             event.accepted = true
-          } else if (event.key === Qt.Key_Left) {
-            root.select(-1)
+          } else if (lateral === Qt.Key_Left) {
+            root.moveDesk(-1)
             event.accepted = true
-          } else if (event.key === Qt.Key_Right) {
-            root.select(1)
+          } else if (lateral === Qt.Key_Right) {
+            root.moveDesk(1)
             event.accepted = true
           } else if (event.key === Qt.Key_Up) {
-            if (root.focusSection === "scratch") root.moveSection(-1)
-            else root.select(-1)
+            root.moveWindow(-1)
             event.accepted = true
           } else if (event.key === Qt.Key_Down) {
-            if (root.focusSection === "mill" && scratchModel.count > 0) root.moveSection(1)
-            else root.select(1)
+            root.moveWindow(1)
             event.accepted = true
           } else if (event.key === Qt.Key_Home) {
-            root.disarmPointer()
-            root.cursorActive = true
-            if (root.focusSection === "scratch") root.scratchIndex = 0
-            else root.millIndex = 0
+            root.focusWindow(0)
             event.accepted = true
           } else if (event.key === Qt.Key_End) {
-            root.disarmPointer()
-            root.cursorActive = true
-            if (root.focusSection === "scratch") root.scratchIndex = Math.max(0, scratchModel.count - 1)
-            else root.millIndex = Math.max(0, millModel.count - 1)
+            var endDesk = root.currentDesk()
+            var endCount = endDesk ? (endDesk.windows || []).length : 0
+            root.focusWindow(Math.max(0, endCount - 1))
             event.accepted = true
           } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter || event.key === Qt.Key_Space) {
             root.activateCurrent()
@@ -673,18 +717,17 @@ Item {
       Column {
         anchors.fill: parent
         anchors.margins: Style.space(28)
-        spacing: Style.space(18)
+        spacing: Style.space(14)
 
         Item {
           width: parent.width
-          height: Style.space(92)
+          height: Style.space(78)
           z: 8
 
           Rectangle {
-            id: searchGlow
-            anchors.centerIn: parent
-            width: Math.min(parent.width, Style.space(640)) + Style.space(18)
-            height: parent.height + Style.space(10)
+            anchors.centerIn: searchPlaque
+            width: searchPlaque.width + Style.space(18)
+            height: searchPlaque.height + Style.space(10)
             radius: height / 2
             color: Qt.rgba(root.accent.r, root.accent.g, root.accent.b, 0.16)
             layer.enabled: true
@@ -699,7 +742,7 @@ Item {
             id: searchPlaque
             anchors.centerIn: parent
             width: Math.min(parent.width, Style.space(640))
-            height: Style.space(78)
+            height: Style.space(64)
             radius: height / 2
             color: Qt.rgba(root.background.r, root.background.g, root.background.b, 0.88)
             border.width: Style.space(2)
@@ -714,6 +757,7 @@ Item {
               Text {
                 anchors.verticalCenter: parent.verticalCenter
                 text: "IkeA"
+                textFormat: Text.PlainText
                 color: root.accent
                 font.family: root.fontFamily
                 font.pixelSize: Style.font.body
@@ -736,7 +780,7 @@ Item {
                   anchors.left: parent.left
                   anchors.right: caret.left
                   anchors.verticalCenter: parent.verticalCenter
-                  text: root.filterText || "Search the mill…"
+                  text: root.filterText || strings.t("search.placeholder")
                   textFormat: Text.PlainText
                   color: root.filterText ? root.foreground : root.muted
                   font.family: root.fontFamily
@@ -760,83 +804,296 @@ Item {
           }
         }
 
-        Item {
+        ListView {
+          id: deskTabs
           width: parent.width
-          height: parent.height - Style.space(92) - Style.space(18) - scratchDock.height - Style.space(18) - hint.height
+          height: root.desks.length > 0 ? Style.space(34) : 0
+          orientation: ListView.Horizontal
+          layoutDirection: LayoutMirroring.enabled ? Qt.RightToLeft : Qt.LeftToRight
+          model: root.desks.length
+          spacing: Style.space(6)
+          clip: true
+          boundsBehavior: Flickable.StopAtBounds
+          highlight: Item {}
+          highlightFollowsCurrentItem: false
 
-          Item {
-            id: millView
-            anchors.fill: parent
-            visible: millModel.count > 0
-            clip: false
+          delegate: Rectangle {
+            id: tab
+            required property int index
+            readonly property var desk: (index >= 0 && index < root.desks.length) ? root.desks[index] : null
+            readonly property bool selected: index === root.deskIndex
+            width: tabLabel.implicitWidth + Style.space(28)
+            height: Style.space(30)
+            radius: Style.space(8)
+            color: tab.selected
+              ? Qt.rgba(root.accent.r, root.accent.g, root.accent.b, tab.desk && tab.desk.scratch ? 0.28 : 0.18)
+              : "transparent"
+            border.width: 1
+            border.color: tab.selected
+              ? root.accent
+              : Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, tab.desk && tab.desk.scratch ? 0.38 : 0.16)
 
-            Repeater {
-              model: millModel
-              delegate: Item {
-                id: millDelegate
-                required property int index
-                required property string address
-                required property string title
-                required property string className
-                required property string appId
-                required property string prettyName
-                required property int workspaceId
-                required property bool activated
-                required property bool urgent
-                required property string profileName
-                required property real aspectRatio
+            Text {
+              id: tabLabel
+              anchors.centerIn: parent
+              text: root.deskTab(tab.desk)
+              textFormat: Text.PlainText
+              color: tab.selected ? root.accent : root.foreground
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
+              font.bold: tab.selected
+              font.letterSpacing: 0.8
+            }
 
-                readonly property int dist: root.millDist(index)
-                readonly property real absDist: Math.abs(dist)
-                visible: absDist <= 2
-                width: root.fitCardW(aspectRatio, root.millMaxW, root.millMaxH)
-                height: root.fitCardH(aspectRatio, root.millMaxW, root.millMaxH)
-                x: millView.width / 2 - width / 2 + dist * (width * 0.62 + Style.space(28))
-                y: millView.height / 2 - height / 2 + Style.space(20) + absDist * absDist * Style.space(16)
-                z: 20 - absDist
-                scale: 1.06 - absDist * 0.2
-                opacity: 1 - absDist * 0.26
-                property real blurAmt: absDist * 0.42
+            MouseArea {
+              anchors.fill: parent
+              cursorShape: Qt.PointingHandCursor
+              onClicked: root.focusDesk(tab.index)
+            }
+          }
+        }
 
-                Behavior on x { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
-                Behavior on y { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
-                Behavior on scale { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
-                Behavior on opacity { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
+        Item {
+          id: millView
+          width: parent.width
+          height: Math.max(Style.space(180), parent.height - Style.space(78) - Style.space(14) - deskTabs.height - Style.space(14) - hint.height)
+          clip: true
 
-                layer.enabled: millDelegate.blurAmt > 0.12
-                layer.smooth: true
-                layer.effect: MultiEffect {
-                  blurEnabled: true
-                  blur: millDelegate.blurAmt
-                  blurMax: 20
+          Repeater {
+            model: root.desks.length
+            delegate: Item {
+              id: deskSlot
+              required property int index
+              readonly property int dist: index - root.deskIndex
+              readonly property var desk: (index >= 0 && index < root.desks.length) ? root.desks[index] : null
+              readonly property int windowCount: deskSlot.desk ? (deskSlot.desk.windows || []).length : 0
+              visible: deskSlot.desk !== null && Math.abs(dist) <= 2
+              width: dist === 0 ? root.cardW : root.spineW
+              height: dist === 0 ? millView.height : Math.round(millView.height * 0.62)
+              x: root.deskX(dist, width)
+              y: dist === 0 ? 0 : (millView.height - height) / 2
+              z: dist === 0 ? 4 : 2
+              opacity: Math.abs(dist) <= 1 ? 1 : 0
+              scale: dist === 0 ? 1 : 0.97
+
+              Behavior on x {
+                NumberAnimation { duration: Style.duration(180); easing.type: Easing.OutCubic }
+              }
+              Behavior on y {
+                NumberAnimation { duration: Style.duration(180); easing.type: Easing.OutCubic }
+              }
+              Behavior on width {
+                NumberAnimation { duration: Style.duration(180); easing.type: Easing.OutCubic }
+              }
+              Behavior on height {
+                NumberAnimation { duration: Style.duration(180); easing.type: Easing.OutCubic }
+              }
+              Behavior on opacity {
+                NumberAnimation { duration: Style.duration(120); easing.type: Easing.OutCubic }
+              }
+              Behavior on scale {
+                NumberAnimation { duration: Style.duration(180); easing.type: Easing.OutCubic }
+              }
+
+              Text {
+                visible: deskSlot.dist === 0
+                anchors.centerIn: parent
+                text: root.deskMark(deskSlot.desk)
+                textFormat: Text.PlainText
+                color: Qt.rgba(root.accent.r, root.accent.g, root.accent.b, 0.10)
+                font.family: root.fontFamily
+                font.pixelSize: Style.space(120)
+                font.bold: true
+                z: 0
+              }
+
+              Repeater {
+                model: deskSlot.dist === 0 ? deskSlot.windowCount : 0
+                delegate: Item {
+                  id: win
+                  required property int index
+                  readonly property int delta: index - root.windowIndex
+                  readonly property var row: (deskSlot.desk && deskSlot.desk.windows) ? deskSlot.desk.windows[index] : null
+                  readonly property int beyond: root.hiddenBeyond(win.delta, deskSlot.windowCount)
+                  visible: win.row !== null && (win.delta === 0 || Math.abs(win.delta) <= root.stackDepth)
+                  width: root.cardW
+                  height: win.delta === 0 ? root.cardH : root.stripH
+                  x: 0
+                  y: root.stackY(win.delta)
+                  z: 8 - Math.abs(win.delta)
+                  scale: win.delta === 0 ? 1 : Math.max(0.94, 1 - Math.abs(win.delta) * 0.02)
+
+                  Behavior on y {
+                    NumberAnimation { duration: Style.duration(120); easing.type: Easing.OutCubic }
+                  }
+                  Behavior on height {
+                    NumberAnimation { duration: Style.duration(120); easing.type: Easing.OutCubic }
+                  }
+
+                  AppPlaque {
+                    anchors.fill: parent
+                    visible: win.delta === 0
+                    address: win.row ? win.row.address : ""
+                    prettyName: win.row ? win.row.prettyName : ""
+                    title: win.row ? win.row.title : ""
+                    badge: win.row && win.row.activated ? strings.t("badge.now") : ""
+                    profileName: win.row ? (win.row.profileName || "") : ""
+                    icon: win.row ? win.row.icon : ""
+                    selected: true
+                    urgent: win.row ? win.row.urgent === true : false
+                    showShot: win.delta === 0 && deskSlot.dist === 0
+                  }
+
+                  Rectangle {
+                    anchors.fill: parent
+                    visible: win.delta !== 0
+                    radius: Style.space(10)
+                    color: Qt.rgba(root.background.r, root.background.g, root.background.b, 0.82)
+                    border.width: 1
+                    border.color: win.row && win.row.urgent
+                      ? Color.urgent
+                      : Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.16)
+
+                    Item {
+                      anchors.fill: parent
+                      anchors.leftMargin: Style.space(10)
+                      anchors.rightMargin: Style.space(10)
+
+                      Image {
+                        id: stripIcon
+                        anchors.verticalCenter: parent.verticalCenter
+                        width: Style.space(22)
+                        height: width
+                        fillMode: Image.PreserveAspectFit
+                        source: win.row ? win.row.icon : ""
+                        asynchronous: true
+                      }
+
+                      Column {
+                        anchors.left: stripIcon.right
+                        anchors.leftMargin: Style.space(8)
+                        anchors.right: parent.right
+                        anchors.rightMargin: moreLabel.visible ? moreLabel.implicitWidth + Style.space(8) : 0
+                        anchors.verticalCenter: parent.verticalCenter
+                        spacing: 0
+
+                        Text {
+                          width: parent.width
+                          text: win.row
+                            ? (win.row.prettyName + (win.row.profileName ? " · " + win.row.profileName : ""))
+                            : ""
+                          textFormat: Text.PlainText
+                          color: root.foreground
+                          font.family: root.fontFamily
+                          font.pixelSize: Style.font.caption
+                          font.bold: true
+                          elide: Text.ElideRight
+                        }
+
+                        Text {
+                          width: parent.width
+                          visible: win.row && String(win.row.title || "").length > 0
+                          text: win.row ? win.row.title : ""
+                          textFormat: Text.PlainText
+                          color: root.muted
+                          font.family: root.fontFamily
+                          font.pixelSize: Style.font.caption
+                          elide: Text.ElideRight
+                        }
+                      }
+
+                      Text {
+                        id: moreLabel
+                        anchors.right: parent.right
+                        anchors.verticalCenter: parent.verticalCenter
+                        visible: win.beyond > 0 && Math.abs(win.delta) === root.stackDepth
+                        text: strings.t("peek.more").arg(Commons.I18n.formatNumber(win.beyond))
+                        textFormat: Text.PlainText
+                        color: root.accent
+                        font.family: root.fontFamily
+                        font.pixelSize: Style.font.caption
+                        font.bold: true
+                      }
+                    }
+                  }
+
+                  MouseArea {
+                    anchors.fill: parent
+                    acceptedButtons: Qt.LeftButton | Qt.MiddleButton | Qt.RightButton
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: function(mouse) {
+                      if (!win.row) return
+                      root.deskIndex = deskSlot.index
+                      root.windowIndex = win.index
+                      keyCatcher.forceActiveFocus()
+                      if (mouse.button === Qt.MiddleButton || mouse.button === Qt.RightButton)
+                        root.closeAddress(win.row.address)
+                      else
+                        root.activateAt(deskSlot.index, win.index)
+                    }
+                  }
                 }
+              }
 
-                AppPlaque {
-                  anchors.fill: parent
-                  address: millDelegate.address
-                  prettyName: millDelegate.prettyName
-                  title: millDelegate.title
-                  badge: millDelegate.activated ? "Now" : ("WS " + millDelegate.workspaceId)
-                  profileName: millDelegate.profileName
-                  icon: root.iconSource({ className: millDelegate.className, appId: millDelegate.appId })
-                  selected: root.focusSection === "mill" && millDelegate.index === root.millIndex
-                  urgent: millDelegate.urgent
+              Rectangle {
+                anchors.fill: parent
+                visible: deskSlot.dist !== 0
+                radius: Style.space(18)
+                color: Qt.rgba(root.background.r, root.background.g, root.background.b, 0.62)
+                border.width: 1
+                border.color: deskSlot.desk && deskSlot.desk.scratch
+                  ? Qt.rgba(root.accent.r, root.accent.g, root.accent.b, 0.55)
+                  : Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.18)
+
+                Column {
+                  anchors.centerIn: parent
+                  width: parent.width - Style.space(16)
+                  spacing: Style.space(8)
+
+                  Text {
+                    width: parent.width
+                    text: root.deskMark(deskSlot.desk)
+                    textFormat: Text.PlainText
+                    color: root.accent
+                    font.family: root.fontFamily
+                    font.pixelSize: deskSlot.desk && deskSlot.desk.scratch ? Style.font.heading : Style.font.displayLarge
+                    font.bold: true
+                    font.letterSpacing: deskSlot.desk && deskSlot.desk.scratch ? 1.4 : 0
+                    horizontalAlignment: Text.AlignHCenter
+                    elide: Text.ElideRight
+                  }
+
+                  Text {
+                    width: parent.width
+                    text: strings.tn("desk.windows", deskSlot.windowCount).arg(Commons.I18n.formatNumber(deskSlot.windowCount))
+                    textFormat: Text.PlainText
+                    color: root.muted
+                    font.family: root.fontFamily
+                    font.pixelSize: Style.font.caption
+                    horizontalAlignment: Text.AlignHCenter
+                  }
+
+                  Column {
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    spacing: Style.space(4)
+                    Repeater {
+                      model: Math.min(deskSlot.windowCount, 6)
+                      Rectangle {
+                        required property int index
+                        width: Style.space(56)
+                        height: Style.space(3)
+                        radius: height / 2
+                        color: root.accent
+                        opacity: 0.22 + (index % 2) * 0.12
+                      }
+                    }
+                  }
                 }
 
                 MouseArea {
                   anchors.fill: parent
-                  hoverEnabled: true
-                  acceptedButtons: Qt.LeftButton | Qt.MiddleButton | Qt.RightButton
                   cursorShape: Qt.PointingHandCursor
-                  onClicked: function(mouse) {
-                    root.focusSection = "mill"
-                    root.millIndex = millDelegate.index
-                    keyCatcher.forceActiveFocus()
-                    if (mouse.button === Qt.MiddleButton || mouse.button === Qt.RightButton)
-                      root.closeAddress(millDelegate.address)
-                    else
-                      root.activateMill(millDelegate.index)
-                  }
+                  onClicked: root.focusDesk(deskSlot.index)
                 }
               }
             }
@@ -845,12 +1102,13 @@ Item {
           Column {
             anchors.centerIn: parent
             spacing: Style.space(8)
-            visible: millModel.count === 0
+            visible: root.desks.length === 0
             width: parent.width * 0.7
 
             Text {
               width: parent.width
               text: "󰖲"
+              textFormat: Text.PlainText
               color: root.foreground
               opacity: 0.75
               font.family: root.fontFamily
@@ -859,7 +1117,9 @@ Item {
             }
             Text {
               width: parent.width
-              text: root.filterText ? ("No mill matches for “" + root.filterText + "”") : "No open windows on the mill"
+              text: root.filterText
+                ? strings.t("search.empty").arg(root.filterText)
+                : strings.t("mill.empty")
               textFormat: Text.PlainText
               color: root.foreground
               opacity: 0.7
@@ -871,114 +1131,12 @@ Item {
           }
         }
 
-        Item {
-          id: scratchDock
-          width: parent.width
-          visible: scratchModel.count > 0
-          height: visible ? scratchFrame.implicitHeight : 0
-
-          Rectangle {
-            id: scratchFrame
-            width: parent.width
-            implicitHeight: scratchCol.implicitHeight + Style.space(24)
-            radius: Style.space(22)
-            color: Qt.rgba(root.background.r, root.background.g, root.background.b, 0.55)
-            border.width: 1
-            border.color: Qt.rgba(root.accent.r, root.accent.g, root.accent.b, root.focusSection === "scratch" ? 0.7 : 0.28)
-
-            Column {
-              id: scratchCol
-              anchors.left: parent.left
-              anchors.right: parent.right
-              anchors.top: parent.top
-              anchors.margins: Style.space(14)
-              spacing: Style.space(8)
-
-              Row {
-                spacing: Style.space(10)
-                Text {
-                  text: "Scratchpad"
-                  color: root.accent
-                  font.family: root.fontFamily
-                  font.pixelSize: Style.font.caption
-                  font.bold: true
-                  font.letterSpacing: 1.2
-                }
-                Text {
-                  text: scratchModel.count === 1 ? "1 window below the waterline" : (scratchModel.count + " windows below the waterline")
-                  color: root.muted
-                  font.family: root.fontFamily
-                  font.pixelSize: Style.font.caption
-                }
-              }
-
-              Flow {
-                id: scratchFlow
-                width: parent.width
-                spacing: Style.space(10)
-
-                Repeater {
-                  model: scratchModel
-                  delegate: Item {
-                    id: scratchDelegate
-                    required property int index
-                    required property string address
-                    required property string title
-                    required property string className
-                    required property string appId
-                    required property string prettyName
-                    required property string profileName
-                    required property bool urgent
-                    required property real aspectRatio
-
-                    width: root.fitCardW(aspectRatio, root.scratchMaxW, root.scratchMaxH)
-                    height: root.fitCardH(aspectRatio, root.scratchMaxW, root.scratchMaxH)
-                    opacity: root.focusSection === "scratch" && index === root.scratchIndex ? 1 : 0.86
-                    scale: root.focusSection === "scratch" && index === root.scratchIndex ? 1.03 : 0.98
-
-                    Behavior on scale { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
-                    Behavior on opacity { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
-
-                    AppPlaque {
-                      anchors.fill: parent
-                      address: scratchDelegate.address
-                      prettyName: scratchDelegate.prettyName
-                      title: scratchDelegate.title
-                      badge: "Scratch"
-                      profileName: scratchDelegate.profileName
-                      icon: root.iconSource({ className: scratchDelegate.className, appId: scratchDelegate.appId })
-                      selected: root.focusSection === "scratch" && scratchDelegate.index === root.scratchIndex
-                      urgent: scratchDelegate.urgent
-                      compact: true
-                    }
-
-                    MouseArea {
-                      anchors.fill: parent
-                      hoverEnabled: true
-                      acceptedButtons: Qt.LeftButton | Qt.MiddleButton | Qt.RightButton
-                      cursorShape: Qt.PointingHandCursor
-                      onClicked: function(mouse) {
-                        root.focusSection = "scratch"
-                        root.scratchIndex = scratchDelegate.index
-                        keyCatcher.forceActiveFocus()
-                        if (mouse.button === Qt.MiddleButton || mouse.button === Qt.RightButton)
-                          root.closeAddress(scratchDelegate.address)
-                        else
-                          root.activateScratch(scratchDelegate.index)
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
-
         Text {
           id: hint
           width: parent.width
           height: Style.space(22)
-          text: "← → mill  ·  ↓ scratchpad  ·  Enter switch  ·  Delete close  ·  Esc dismiss"
+          text: strings.t("hint")
+          textFormat: Text.PlainText
           color: root.foreground
           opacity: 0.48
           font.family: root.fontFamily

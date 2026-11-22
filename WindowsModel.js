@@ -3,11 +3,19 @@ function ipcClass(toplevel) {
   return String(ipc.class || ipc.initialClass || "")
 }
 
+// Omarchy 4.5 parks minimized windows on this special workspace. The dock
+// is what brings them back, so the mill does not list them.
+function isMinimized(ws) {
+  var name = String((ws && ws.name) || "").toLowerCase()
+  return name === "special:minimized" || name === "minimized"
+}
+
 function shouldSkip(toplevel) {
   if (!toplevel) return true
   var ipc = toplevel.lastIpcObject || {}
   if (ipc.mapped === false) return true
   var ws = workspaceInfo(toplevel)
+  if (isMinimized(ws)) return true
   if (ipc.hidden === true && !isScratchpad(ws)) return true
   var className = ipcClass(toplevel)
   var skip = {
@@ -77,10 +85,67 @@ function workspaceInfo(toplevel) {
 }
 
 function isScratchpad(ws) {
-  if (!ws) return false
+  if (!ws || isMinimized(ws)) return false
   if (typeof ws.id === "number" && ws.id < 0) return true
   var name = String(ws.name || "").toLowerCase()
   return name.indexOf("special") === 0 || name.indexOf("scratch") !== -1
+}
+
+function windowOrder(a, b) {
+  var an = String((a && (a.prettyName || a.className)) || "").toLowerCase()
+  var bn = String((b && (b.prettyName || b.className)) || "").toLowerCase()
+  if (an < bn) return -1
+  if (an > bn) return 1
+  var at = String((a && a.title) || "").toLowerCase()
+  var bt = String((b && b.title) || "").toLowerCase()
+  if (at < bt) return -1
+  if (at > bt) return 1
+  return 0
+}
+
+// One desk per workspace, scratchpad last. Windows on a desk stay in name
+// order so a focus change does not reshuffle the stack.
+function groupDesks(rows) {
+  var map = {}
+  var order = []
+  var scratch = []
+  var list = rows || []
+  for (var i = 0; i < list.length; i++) {
+    var row = list[i]
+    if (row.scratchpad) {
+      scratch.push(row)
+      continue
+    }
+    var key = "ws:" + row.workspaceId
+    if (!map[key]) {
+      map[key] = {
+        key: key,
+        workspaceId: row.workspaceId,
+        workspaceName: row.workspaceName || String(row.workspaceId),
+        scratch: false,
+        windows: []
+      }
+      order.push(key)
+    }
+    map[key].windows.push(row)
+  }
+  order.sort(function(a, b) { return map[a].workspaceId - map[b].workspaceId })
+  var desks = []
+  for (var j = 0; j < order.length; j++) {
+    map[order[j]].windows.sort(windowOrder)
+    desks.push(map[order[j]])
+  }
+  if (scratch.length) {
+    scratch.sort(windowOrder)
+    desks.push({
+      key: "scratch",
+      workspaceId: -1,
+      workspaceName: "Scratch",
+      scratch: true,
+      windows: scratch
+    })
+  }
+  return desks
 }
 
 function collectWindows(hyprland) {
@@ -168,10 +233,12 @@ if (typeof module !== "undefined") {
   module.exports = {
     collectWindows: collectWindows,
     partitionWindows: partitionWindows,
+    groupDesks: groupDesks,
     matchesFilter: matchesFilter,
     prettyApp: prettyApp,
     findToplevel: findToplevel,
     windowCount: windowCount,
+    isMinimized: isMinimized,
     isScratchpad: isScratchpad,
     workspaceInfo: workspaceInfo,
     browserProfile: browserProfile,

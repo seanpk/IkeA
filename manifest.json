@@ -2,10 +2,10 @@
   "schemaVersion": 1,
   "id": "ikekavas.ikea",
   "name": "IkeA",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "author": "Ike Kavas",
   "license": "MIT",
-  "description": "I know every App — mill-wheel switcher for running windows, with a scratchpad dock",
+  "description": "I know every App — a mill of workspace desks, each holding a stack of its windows",
   "homepage": "https://github.com/ike-kavas/IkeA",
   "repository": "https://github.com/ike-kavas/IkeA",
   "kinds": [

@@ -2,7 +2,7 @@
 
 **I know every App.**
 
-An Omarchy shell plugin that lists every open GUI window so you can switch with the keyboard. Cards show a live screenshot of the window (so two browser profiles look different); scratchpad windows sit in a wrapping dock below. Search, arrow to the app, press Enter.
+An Omarchy shell plugin that lists every open GUI window so you can switch with the keyboard. The mill turns by workspace: left and right move from desk to desk, and the open desk holds a stack of its windows. The front card is a live screenshot (so two browser profiles look different). Up and down move through that stack. The scratchpad is the last desk on the mill. Search, arrow to the window, press Enter.
 
 ![IkeA mill switcher](preview.png)
 
@@ -18,10 +18,11 @@ Then add a shortcut if you want one:
 
 ```lua
 -- ~/.config/hypr/bindings.lua
-o.bind("SUPER + A", "IkeA", "omarchy-shell shell toggle ikekavas.ikea")
+-- Omarchy 4.5 binds Super+A to Select all. rebind gives that chord to IkeA.
+o.rebind("SUPER + A", "IkeA", { panel = "ikekavas.ikea" })
 ```
 
-`SUPER + A` is free on a stock Omarchy bind set. If you already use that chord, pick another key and skip the unbind.
+On Omarchy before 4.5, where Super+A is still free, `o.bind` is enough. If you already use that chord for something else, pick another key.
 
 Place the bar button if it did not land where you want it:
 
@@ -32,11 +33,15 @@ omarchy bar move ikekavas.ikea --before omarchy.active-window
 ## Use
 
 - Open from the bar icon, or Super+A if you bound it
-- Type to filter the mill and the scratchpad
-- Left / Right (or Tab) turn the mill; Down moves into the scratchpad dock
-- Enter or click switches to that window
+- Type to filter every desk
+- Left / Right turn the mill from desk to desk. Neighbor desks show as spines, so a long row of workspaces stays a tab and two spines
+- Up / Down move through the stack on the open desk. The front card is the live window; the cards behind it are title strips
+- The scratchpad is the last desk, reached with Right, not a separate dock
+- Enter or a click switches to that window
 - Delete, Ctrl+W, middle-click, or right-click closes it
 - Esc dismisses (or clears the search first)
+
+Minimized windows stay on the dock. IkeA does not list them.
 
 ## Remove
 

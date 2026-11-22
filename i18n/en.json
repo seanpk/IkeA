@@ -1,0 +1,20 @@
+{
+  "search.placeholder": "Search desks…",
+  "search.empty": "No desk matches for “%1”",
+  "mill.empty": "No open windows",
+  "hint": "← → desk    ↑ ↓ window    Enter open    Delete close    Esc",
+  "desk.kind": "Desk",
+  "desk.scratch": "Scratch",
+  "desk.scratchKind": "Scratchpad",
+  "desk.scratchMark": "SCR",
+  "desk.windows": {
+    "one": "%1 window",
+    "other": "%1 windows"
+  },
+  "peek.more": "+%1",
+  "badge.now": "Now",
+  "bar.tooltip": {
+    "one": "IkeA · I know every App · %1 open window · Super+A",
+    "other": "IkeA · I know every App · %1 open windows · Super+A"
+  }
+}
