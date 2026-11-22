@@ -458,7 +458,10 @@ Item {
         height: width
         fillMode: Image.PreserveAspectFit
         source: plaque.icon
-        asynchronous: true
+        // image://icon/ goes through QIcon::pixmap. An asynchronous Image
+        // runs that on QQuickPixmapReader, which segfaults the shell on
+        // Wayland (quickshell#1028). Stay on the GUI thread.
+        asynchronous: false
         opacity: 0.28
       }
 
@@ -966,7 +969,9 @@ Item {
                         height: width
                         fillMode: Image.PreserveAspectFit
                         source: win.row ? win.row.icon : ""
-                        asynchronous: true
+                        // Same constraint as the card icon: image://icon/ must
+                        // not load on QQuickPixmapReader.
+                        asynchronous: false
                       }
 
                       Column {
