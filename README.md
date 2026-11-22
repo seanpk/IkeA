@@ -6,7 +6,7 @@ An Omarchy shell plugin that lists every open GUI window so you can switch with 
 
 ![IkeA mill switcher](preview.png)
 
-A short [screen recording](docs/ikea-demo.mp4) of the mill, search, and scratchpad dock.
+A short [screen recording](docs/ikea-demo.mp4) of the desk mill, the window stack, and the scratchpad as the last desk.
 
 ## Install
 
