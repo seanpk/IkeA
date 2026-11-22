@@ -25,6 +25,9 @@ Item {
   property int windowIndex: 0
   property bool preferNextOnOpen: false
   property bool caretOn: true
+  // Behaviors stay off while the mill is being placed, rebuilt, or wrapped,
+  // so desks do not fly in from x = 0 or sweep across every desk on a wrap.
+  property bool motions: false
 
   property color background: Color.menu.background
   property color foreground: Color.menu.text
@@ -50,7 +53,17 @@ Item {
 
   Commons.Translations { id: strings; directory: Qt.resolvedUrl("i18n") }
 
+  component Glide: NumberAnimation {
+    duration: Style.duration(280)
+    easing.type: Easing.OutCubic
+  }
+
+  function armMotion() {
+    if (root.opened && millView.width > 0) root.motions = true
+  }
+
   function open(payloadJson) {
+    root.motions = false
     root.opened = true
     root.filterText = ""
     root.deskIndex = 0
@@ -246,11 +259,13 @@ Item {
       }
     }
 
+    root.motions = false
     root.preferNextOnOpen = false
     root.desks = nextDesks
     root.deskIndex = nextDesk
     root.windowIndex = nextWindow
     Qt.callLater(root.centerTab)
+    Qt.callLater(root.armMotion)
   }
 
   function setFilter(nextFilter) {
@@ -268,7 +283,12 @@ Item {
     if (root.desks.length === 0) return
     var n = root.desks.length
     var next = ((index % n) + n) % n
+    var jump = Math.abs(next - root.deskIndex)
+    // A wrap would slide a card across the whole mill. Snap, then arm again.
+    if (jump > 1) root.motions = false
+    else root.armMotion()
     root.deskIndex = next
+    if (jump > 1) Qt.callLater(root.armMotion)
     var windows = root.desks[next].windows || []
     var win = 0
     for (var i = 0; i < windows.length; i++) {
@@ -317,9 +337,9 @@ Item {
     return (millView.width - itemWidth) / 2 + signed * travel
   }
 
-  function stackY(delta) {
+  function stackY(delta, frameHeight) {
     var gap = Style.space(8)
-    var mid = millView.height / 2
+    var mid = frameHeight / 2
     if (delta === 0) return mid - root.cardH / 2
     if (delta > 0)
       return mid + root.cardH / 2 + gap + (delta - 1) * (root.stripH + gap)
@@ -836,6 +856,9 @@ Item {
               ? root.accent
               : Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, tab.desk && tab.desk.scratch ? 0.38 : 0.16)
 
+            Behavior on color { enabled: root.motions; ColorAnimation { duration: Style.duration(180); easing.type: Easing.Bezier; easing.bezierCurve: Style.easeOut } }
+            Behavior on border.color { enabled: root.motions; ColorAnimation { duration: Style.duration(180); easing.type: Easing.Bezier; easing.bezierCurve: Style.easeOut } }
+
             Text {
               id: tabLabel
               anchors.centerIn: parent
@@ -861,6 +884,7 @@ Item {
           width: parent.width
           height: Math.max(Style.space(180), parent.height - Style.space(78) - Style.space(14) - deskTabs.height - Style.space(14) - hint.height)
           clip: true
+          onWidthChanged: root.armMotion()
 
           Repeater {
             model: root.desks.length
@@ -870,36 +894,30 @@ Item {
               readonly property int dist: index - root.deskIndex
               readonly property var desk: (index >= 0 && index < root.desks.length) ? root.desks[index] : null
               readonly property int windowCount: deskSlot.desk ? (deskSlot.desk.windows || []).length : 0
+              // Targets, not the animated width and height. deskX() used to
+              // read `width` while it was still moving, so x chased a new
+              // destination every frame.
+              readonly property int slotW: dist === 0 ? root.cardW : root.spineW
+              readonly property int slotH: dist === 0 ? millView.height : Math.round(millView.height * 0.62)
+              property real shown: dist === 0 ? 1 : 0
               visible: deskSlot.desk !== null && Math.abs(dist) <= 2
-              width: dist === 0 ? root.cardW : root.spineW
-              height: dist === 0 ? millView.height : Math.round(millView.height * 0.62)
-              x: root.deskX(dist, width)
-              y: dist === 0 ? 0 : (millView.height - height) / 2
+              width: slotW
+              height: slotH
+              x: root.deskX(dist, slotW)
+              y: dist === 0 ? 0 : (millView.height - slotH) / 2
               z: dist === 0 ? 4 : 2
               opacity: Math.abs(dist) <= 1 ? 1 : 0
-              scale: dist === 0 ? 1 : 0.97
 
-              Behavior on x {
-                NumberAnimation { duration: Style.duration(180); easing.type: Easing.OutCubic }
-              }
-              Behavior on y {
-                NumberAnimation { duration: Style.duration(180); easing.type: Easing.OutCubic }
-              }
-              Behavior on width {
-                NumberAnimation { duration: Style.duration(180); easing.type: Easing.OutCubic }
-              }
-              Behavior on height {
-                NumberAnimation { duration: Style.duration(180); easing.type: Easing.OutCubic }
-              }
-              Behavior on opacity {
-                NumberAnimation { duration: Style.duration(120); easing.type: Easing.OutCubic }
-              }
-              Behavior on scale {
-                NumberAnimation { duration: Style.duration(180); easing.type: Easing.OutCubic }
-              }
+              Behavior on x { enabled: root.motions; Glide {} }
+              Behavior on y { enabled: root.motions; Glide {} }
+              Behavior on width { enabled: root.motions; Glide {} }
+              Behavior on height { enabled: root.motions; Glide {} }
+              Behavior on opacity { enabled: root.motions; Glide { duration: Style.duration(160) } }
+              Behavior on shown { enabled: root.motions; Glide {} }
 
               Text {
-                visible: deskSlot.dist === 0
+                opacity: deskSlot.shown
+                visible: opacity > 0.02
                 anchors.centerIn: parent
                 text: root.deskMark(deskSlot.desk)
                 textFormat: Text.PlainText
@@ -911,27 +929,35 @@ Item {
               }
 
               Repeater {
-                model: deskSlot.dist === 0 ? deskSlot.windowCount : 0
+                model: (deskSlot.dist === 0 || deskSlot.shown > 0.02) ? deskSlot.windowCount : 0
                 delegate: Item {
                   id: win
                   required property int index
+                  // The first geometry is applied before this flips, so a new
+                  // card does not grow up from y = 0.
+                  property bool placed: false
                   readonly property int delta: index - root.windowIndex
                   readonly property var row: (deskSlot.desk && deskSlot.desk.windows) ? deskSlot.desk.windows[index] : null
                   readonly property int beyond: root.hiddenBeyond(win.delta, deskSlot.windowCount)
                   visible: win.row !== null && (win.delta === 0 || Math.abs(win.delta) <= root.stackDepth)
+                  // The picture stays out until the plaque has arrived. It is
+                  // placed against the final frame height, not the height the
+                  // plaque is still animating, so it cannot drift off the desk.
+                  opacity: Math.max(0, (deskSlot.shown - 0.82) / 0.18)
                   width: root.cardW
                   height: win.delta === 0 ? root.cardH : root.stripH
-                  x: 0
-                  y: root.stackY(win.delta)
+                  anchors.horizontalCenter: parent.horizontalCenter
+                  y: root.stackY(win.delta, deskSlot.slotH)
                   z: 8 - Math.abs(win.delta)
                   scale: win.delta === 0 ? 1 : Math.max(0.94, 1 - Math.abs(win.delta) * 0.02)
 
+                  Component.onCompleted: win.placed = true
+
                   Behavior on y {
-                    NumberAnimation { duration: Style.duration(120); easing.type: Easing.OutCubic }
+                    enabled: root.motions && win.placed && deskSlot.dist === 0 && deskSlot.shown > 0.99
+                    Glide { duration: Style.duration(200) }
                   }
-                  Behavior on height {
-                    NumberAnimation { duration: Style.duration(120); easing.type: Easing.OutCubic }
-                  }
+                  Behavior on height { enabled: root.motions && win.placed; Glide { duration: Style.duration(200) } }
 
                   AppPlaque {
                     anchors.fill: parent
@@ -944,7 +970,7 @@ Item {
                     icon: win.row ? win.row.icon : ""
                     selected: true
                     urgent: win.row ? win.row.urgent === true : false
-                    showShot: win.delta === 0 && deskSlot.dist === 0
+                    showShot: win.delta === 0 && deskSlot.shown > 0.82
                   }
 
                   Rectangle {
@@ -1042,7 +1068,8 @@ Item {
 
               Rectangle {
                 anchors.fill: parent
-                visible: deskSlot.dist !== 0
+                opacity: 1 - deskSlot.shown
+                visible: opacity > 0.02
                 radius: Style.space(18)
                 color: Qt.rgba(root.background.r, root.background.g, root.background.b, 0.62)
                 border.width: 1
